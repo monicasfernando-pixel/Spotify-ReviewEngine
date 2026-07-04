@@ -267,71 +267,99 @@ def fetch_playstore_reviews(count: int = 200, status=None) -> List[Dict]:
         return []
 
 
-# ── Reddit scraper ────────────────────────────────────────────────────────────
+# ── Reddit scraper (no credentials — public RSS/Atom feed) ────────────────────
 
-def fetch_reddit_posts(
-    client_id: str, client_secret: str,
-    count: int = 80, status=None
-) -> List[Dict]:
-    if status:
-        status.text("Reddit — connecting…")
+import xml.etree.ElementTree as ET
+
+REDDIT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; SpotifyResearch/1.0)",
+    "Accept": "application/rss+xml, application/xml, text/xml",
+}
+REDDIT_NS = {"atom": "http://www.w3.org/2005/Atom"}
+
+REDDIT_QUERIES = [
+    "music discovery",
+    "recommendation",
+    "new music",
+    "discover weekly",
+    "boring playlist",
+    "repetitive",
+]
+REDDIT_SUBS = ["spotify", "musicsuggest"]
+
+
+def _fetch_rss(sub: str, query: str) -> List[Dict]:
+    """Fetch one Reddit RSS search feed and return parsed posts."""
+    url = (
+        f"https://www.reddit.com/r/{sub}/search.rss"
+        f"?q={requests.utils.quote(query)}"
+        f"&sort=relevance&t=year&restrict_sr=1"
+    )
     try:
-        import praw
-        reddit = praw.Reddit(
-            client_id=client_id,
-            client_secret=client_secret,
-            user_agent="SpotifyDiscoveryAnalyzer:v1.0",
-        )
+        resp = requests.get(url, headers=REDDIT_HEADERS, timeout=12)
+        if resp.status_code != 200:
+            return []
+        root = ET.fromstring(resp.content)
+        entries = root.findall("atom:entry", REDDIT_NS)
+        posts = []
+        for entry in entries:
+            title   = (entry.findtext("atom:title",   "", REDDIT_NS) or "").strip()
+            content = (entry.findtext("atom:content", "", REDDIT_NS) or "").strip()
+            author  = (entry.findtext("atom:author/atom:name", "", REDDIT_NS) or "").strip()
+            updated = (entry.findtext("atom:updated", "", REDDIT_NS) or "")[:10]
+            uid     = entry.findtext("atom:id", "", REDDIT_NS) or ""
 
-        posts: List[Dict] = []
-        seen: set = set()
-        queries = [
-            "music discovery", "recommendation", "new music",
-            "discover weekly", "boring playlist", "repetitive",
-        ]
-        subreddits = ["spotify", "musicsuggest"]
+            # content is HTML — strip tags for plain text
+            clean = re.sub(r"<[^>]+>", " ", content)
+            clean = re.sub(r"\s+", " ", clean).strip()[:600]
+            combined = f"{title}. {clean}".strip(". ")
+            if len(combined) < 20:
+                continue
 
-        for sub_name in subreddits:
-            if status:
-                status.text(f"Reddit — scanning r/{sub_name}…")
-            sub = reddit.subreddit(sub_name)
-
-            for q in queries[:3]:
-                try:
-                    for post in sub.search(q, limit=20, sort="relevance", time_filter="year"):
-                        if post.id in seen:
-                            continue
-                        seen.add(post.id)
-
-                        body = post.selftext.strip() if post.selftext else ""
-                        combined = f"{post.title}. {body}"[:800].strip()
-                        if len(combined) < 20:
-                            continue
-
-                        posts.append({
-                            "source": "Reddit",
-                            "rating": None,
-                            "title":  post.title,
-                            "text":   combined,
-                            "date":   datetime.utcfromtimestamp(
-                                post.created_utc
-                            ).strftime("%Y-%m-%d"),
-                            "author": str(post.author) if post.author else "[deleted]",
-                        })
-
-                        if len(posts) >= count:
-                            break
-                    time.sleep(0.5)
-                except Exception:
-                    continue
-                if len(posts) >= count:
-                    break
-            if len(posts) >= count:
-                break
-
-        return posts[:count]
+            posts.append({
+                "source": "Reddit",
+                "rating": None,
+                "title":  title,
+                "text":   combined,
+                "date":   updated,
+                "author": author or "[deleted]",
+                "_uid":   uid,
+            })
+        return posts
     except Exception:
         return []
+
+
+def fetch_reddit_posts(
+    client_id: str = "", client_secret: str = "",
+    count: int = 100, status=None,
+) -> List[Dict]:
+    """Fetch Reddit posts via public RSS — no credentials required."""
+    if status:
+        status.text("Reddit — fetching via public RSS…")
+
+    all_posts: List[Dict] = []
+    seen: set = set()
+
+    for sub in REDDIT_SUBS:
+        for query in REDDIT_QUERIES:
+            if len(all_posts) >= count:
+                break
+            if status:
+                status.text(f"Reddit — r/{sub}: '{query}'…")
+
+            for post in _fetch_rss(sub, query):
+                uid = post.pop("_uid", post["text"][:60])
+                if uid in seen:
+                    continue
+                seen.add(uid)
+                all_posts.append(post)
+                if len(all_posts) >= count:
+                    break
+
+            time.sleep(0.8)
+
+    return all_posts[:count]
 
 
 # ── Spotify Community scraper ─────────────────────────────────────────────────
@@ -686,7 +714,7 @@ def main():
         st.markdown("### Sources")
         use_appstore   = st.checkbox("App Store Reviews",    value=True)
         use_playstore  = st.checkbox("Play Store Reviews",   value=True)
-        use_reddit     = st.checkbox("Reddit Discussions",   value=bool(reddit_id and reddit_secret))
+        use_reddit     = st.checkbox("Reddit Discussions",   value=True)
         use_community  = st.checkbox("Spotify Community",    value=True)
 
         st.markdown("### Volume")
@@ -742,9 +770,7 @@ def main():
         st.error("API key not configured. Set ANTHROPIC_API_KEY in Streamlit secrets.")
         return
 
-    if use_reddit and not (reddit_id and reddit_secret):
-        st.warning("Reddit credentials missing — Reddit will be skipped.")
-        use_reddit = False
+    # Reddit uses public JSON API — no credentials needed
 
     # ── Pipeline ──
     all_reviews: List[Dict] = []
@@ -775,7 +801,7 @@ def main():
             st.warning("⚠️ Play Store — 0 reviews (scraper may need updating)")
 
     if use_reddit:
-        r = fetch_reddit_posts(reddit_id, reddit_secret, n_reddit, status)
+        r = fetch_reddit_posts(count=n_reddit, status=status)
         all_reviews.extend(r)
         done += 1
         progress.progress(done / (n_steps + 1))
