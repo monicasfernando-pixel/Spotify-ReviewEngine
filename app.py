@@ -28,6 +28,23 @@ st.markdown("""
     .stApp { background-color: #121212; color: #ffffff; }
     section[data-testid="stSidebar"] { background-color: #1a1a1a; }
 
+    /* Sidebar text — labels, captions, markdown */
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] .stMarkdown p,
+    section[data-testid="stSidebar"] .stMarkdown h2,
+    section[data-testid="stSidebar"] .stMarkdown h3,
+    section[data-testid="stSidebar"] .stCheckbox label p,
+    section[data-testid="stSidebar"] .stSlider label p,
+    section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] p { color: #ffffff !important; }
+
+    /* Slider value/tick text */
+    section[data-testid="stSidebar"] .stSlider [data-testid="stTickBarMin"],
+    section[data-testid="stSidebar"] .stSlider [data-testid="stTickBarMax"] {
+        color: #cccccc !important;
+    }
+
     .app-header {
         background: linear-gradient(135deg, #1DB954 0%, #191414 100%);
         padding: 2rem 2.5rem;
