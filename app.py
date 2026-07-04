@@ -642,38 +642,35 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
+    # ── Read API keys silently from environment / Streamlit secrets ──
+    # Keys are never shown in the UI — loaded from .env locally or
+    # Streamlit Cloud secrets in production.
+    def _get_secret(key: str) -> str:
+        # Streamlit Cloud secrets take priority, then environment
+        try:
+            return st.secrets[key]
+        except Exception:
+            return os.getenv(key, "")
+
+    anthropic_key = _get_secret("ANTHROPIC_API_KEY")
+    reddit_id     = _get_secret("REDDIT_CLIENT_ID")
+    reddit_secret = _get_secret("REDDIT_CLIENT_SECRET")
+
     # ── Sidebar ──
     with st.sidebar:
         st.markdown("## ⚙️ Configuration")
 
-        st.markdown("### API Keys")
-        anthropic_key = st.text_input(
-            "Anthropic API Key *",
-            value=os.getenv("ANTHROPIC_API_KEY", ""),
-            type="password",
-            help="Required. Get yours at console.anthropic.com",
-        )
+        # Show a green lock if key is present, red warning if missing
+        if anthropic_key:
+            st.success("AI analysis ready")
+        else:
+            st.error("ANTHROPIC_API_KEY not configured")
 
         st.markdown("### Sources")
         use_appstore   = st.checkbox("App Store Reviews",    value=True)
         use_playstore  = st.checkbox("Play Store Reviews",   value=True)
-        use_reddit     = st.checkbox("Reddit Discussions",   value=True)
+        use_reddit     = st.checkbox("Reddit Discussions",   value=bool(reddit_id and reddit_secret))
         use_community  = st.checkbox("Spotify Community",    value=True)
-
-        reddit_id, reddit_secret = "", ""
-        if use_reddit:
-            with st.expander("Reddit Credentials (required for Reddit)"):
-                reddit_id     = st.text_input(
-                    "Client ID",
-                    value=os.getenv("REDDIT_CLIENT_ID", ""),
-                    type="password",
-                )
-                reddit_secret = st.text_input(
-                    "Client Secret",
-                    value=os.getenv("REDDIT_CLIENT_SECRET", ""),
-                    type="password",
-                )
-                st.caption("Create a free app at reddit.com/prefs/apps (type: script)")
 
         st.markdown("### Volume")
         n_countries    = st.slider("App Store — countries to scrape", 3, 12, 8,
@@ -718,14 +715,14 @@ def main():
         st.markdown("""
         <br>
         <p style="color:#888; text-align:center;">
-            Enter your Anthropic API key in the sidebar and click <b>Run Analysis</b> to begin.
+            Select your sources in the sidebar and click <b>Run Analysis</b> to begin.
         </p>
         """, unsafe_allow_html=True)
         return
 
     # ── Validation ──
     if not anthropic_key:
-        st.error("Please enter your Anthropic API key in the sidebar.")
+        st.error("API key not configured. Set ANTHROPIC_API_KEY in Streamlit secrets.")
         return
 
     if use_reddit and not (reddit_id and reddit_secret):
